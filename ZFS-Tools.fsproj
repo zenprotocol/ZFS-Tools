@@ -71,4 +71,5 @@
       </ItemGroup>
     </When>
   </Choose>
+  <Import Project="packages\ZFStar\build\ZFStar.targets" Condition="Exists('packages\ZFStar\build\ZFStar.targets')" Label="Paket" />
 </Project>
