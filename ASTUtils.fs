@@ -488,8 +488,32 @@ let ast_to_string ast =
     let doc, comments = TD.modul_with_comments_to_document modul _comments
     let sb = new Text.StringBuilder();
     let sw = new IO.StringWriter(sb);
-    PP.pretty_out_channel 1.0 100 doc sw
+    PP.pretty_out_channel 1.0 100 doc sw;
     sw.Flush();
     sw.Close();
     sb.ToString()
 
+// prints a module to a specified output channel
+let print_modul' : modul -> FStar.Util.out_channel -> unit = 
+    TD.modul_to_document >> PP.pretty_out_channel 1.0 100
+
+// prints a module to stdout
+let print_modul (m:modul) : unit =
+    print_modul' m stdout
+
+// prints an AST to a specified output channel
+let print_ast' (ast : modul * list<string * FStar.Range.range>) : FStar.Util.out_channel -> unit =
+    ast ||> TD.modul_with_comments_to_document
+        |> fst
+        |> PP.pretty_out_channel 1.0 100
+
+// prints an AST to stdout
+let print_ast (ast : modul * list<string * FStar.Range.range>) : unit =
+    print_ast' ast stdout
+
+let write_ast_to_file (ast : modul * list<string * FStar.Range.range>) (filename:string) =
+    let swriter = new System.IO.StreamWriter(filename, false);
+    print_ast' ast swriter;
+    swriter.Flush();
+    swriter.Close();
+    ()
