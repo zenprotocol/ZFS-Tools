@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <ItemGroup>
+      <ZFS-ToolsOutputFiles Include="$(SolutionDir)\..\packages\ZFS-Tools\tools\*.*" />
+  </ItemGroup>
+
+  <!-- ============================================================ -->
+  <!-- Build targets                                                -->
+  <!-- ============================================================ -->
+  <!--
+  Is run once after build, checks if the project's nuget package's .nuspec depends on Baseclass.Contrib.Nuget.Output and copies everything which is in the
+  output folder to the builds OutDir.
+  -->
+  <Target Name="ZFS-ToolsCopyToOutput" AfterTargets="Compile">
+    <Copy SourceFiles="@(ZFS-ToolsOutputFiles)" DestinationFiles="@(ZFS-ToolsOutputFiles->'$(OutDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+  <!--
+  Is run once after clean, delete all files that match files collected by the CollectZenZ3LinuxOutputFiles task.
+  -->
+  <Target Name="ZFS-ToolsCleanOutput" AfterTargets="Clean">
+    <Delete Files="@(ZFS-ToolsOutputFiles->'$(OutDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+  <!--
+  Is run once per file which has been deleted by the ZenZ3LinuxCleanOutput target, if the containing folder is empty it gets deleted.
+  -->
+  <Target Name="ZFS-ToolsCleanEmptyFolder" Inputs="@(ZFS-ToolsOutputFiles)" Outputs="%(Identity).Dummy" AfterTargets="ZFS-ToolsCleanOutput">
+    <ItemGroup>
+      <EmptyCheck Include="$(OutDir)%(ZFS-ToolsOutputFiles.RecursiveDir)**\*.*" />
+    </ItemGroup>
+
+    <RemoveDir Condition="'@(EmptyCheck)' == '' And '%(ZFS-ToolsOutputFiles.RecursiveDir)' != ''" Directories="$(OutDir)%(ZFS-ToolsOutputFiles.RecursiveDir)" />
+  </Target>
+</Project>
