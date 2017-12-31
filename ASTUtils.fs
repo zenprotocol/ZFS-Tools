@@ -4,7 +4,9 @@ open System
 open FStar.Parser.AST
 open FStar.Ident
 open FStar.Const
-(*
+
+module String = FSharpx.String
+
 type AST = modul list * (string * FStar.Range.range) list
 
 (* parenthesises a term *)
@@ -25,10 +27,10 @@ let mk_int_at (n:int) : term -> term =
 let qual_ns_ident (nsstr:string) (ident:ident) : lid = 
     let firstCharIsUpper : string -> bool = Seq.head >> Char.IsUpper
     
-    let ns_ids = nsstr |> split ["."]
-    let ns:list<ident> = ns_ids |> map (fun (s:string) -> {idText=s; idRange=ident.idRange})
-                                  |> toList
-    if not (ns_ids |> forall firstCharIsUpper)
+    let ns_ids = nsstr |> String.splitChar [|'.'|]
+    let ns:list<ident> = ns_ids |> Array.map (fun (s:string) -> {idText=s; idRange=ident.idRange})
+                                |> Array.toList
+    if not (ns_ids |> Array.forall firstCharIsUpper)
         then invalidArg nsstr "Invalid namespace identifier format";
     
     {ns=ns; ident=ident; nsstr=nsstr; str=String.concat "." [nsstr; ident.idText]}
@@ -80,7 +82,7 @@ let rec check_pattern pat =
     match pat.pat with
     | PatApp (p1, ls_pat) ->
         check_pattern p1;
-        ls_pat |> iter (fun p -> check_pattern p);
+        ls_pat |> List.iter (fun p -> check_pattern p);
     | PatName lid -> // What is this?
         check_ident lid.ident
     | PatVar (ident,_)
@@ -89,9 +91,9 @@ let rec check_pattern pat =
     | PatList ls_pat
     | PatTuple (ls_pat, _)
     | PatOr ls_pat -> // What is this?
-        ls_pat |> iter (fun p -> check_pattern p);
+        ls_pat |> List.iter (fun p -> check_pattern p);
     | PatRecord ls_lid_pat -> // When does this occur?
-        ls_lid_pat |> iter (fun (l,p) ->
+        ls_lid_pat |> List.iter (fun (l,p) ->
                         check_ident l.ident;
                         check_pattern p);
     | PatAscribed (p1,_) -> check_pattern p1;
@@ -115,18 +117,18 @@ let rec pat_cost {pat=pat} =
     | PatVector pats
     | PatTuple (pats, _)
     | PatOr pats ->
-        pats |> map pat_cost
-             |> sum
+        pats |> List.map pat_cost
+             |> List.sum
     
     | PatRecord fields ->
-        let _, field_pats = unzip fields
-        field_pats |> map pat_cost
-                   |> sum
+        let _, field_pats = List.unzip fields
+        field_pats |> List.map pat_cost
+                   |> List.sum
     
     | PatApp (patn, arg_pats) ->
         let patn_cost = pat_cost patn
-        let arg_pats_costs = map pat_cost arg_pats
-        let sum_arg_pats_costs = sum arg_pats_costs
+        let arg_pats_costs = List.map pat_cost arg_pats
+        let sum_arg_pats_costs = List.sum arg_pats_costs
         patn_cost + sum_arg_pats_costs
 
 (* returns a tuple of the elaborated branch, and the cost of the branch *)
@@ -177,7 +179,7 @@ let rec elab_term
             
     | Abs (patterns, expr) -> // lambdas
         let expr_elaborated = elab_term expr ||> mk_inc
-        patterns |> iter check_pattern;
+        patterns |> List.iter check_pattern;
         let lambda_elaborated = mk_term_here <| Abs (patterns, expr_elaborated)
         (lambda_elaborated, 0)
     
@@ -191,11 +193,11 @@ let rec elab_term
            [ Op ( "+", [x;y] ) ] 
            = [x + y] *)
         let args_elaborated, args_costs = 
-            args |> map elab_term
-                 |> unzip
+            args |> List.map elab_term
+                 |> List.unzip
         let op_term = mk_term_here <| Op (op_name, args_elaborated)
-        let sum_args_cost = sum args_costs
-        let num_args = length args
+        let sum_args_cost = List.sum args_costs
+        let num_args = List.length args
         let op_term_cost = num_args + sum_args_cost
         (op_term, op_term_cost)
     
@@ -212,17 +214,17 @@ let rec elab_term
            [ Construct ( "Some", [x, Nothing] ) ] 
            = [Some x] *)
         let (ctor_args_terms, ctor_args_imps) : (list<term> * list<imp>) =
-            unzip ctor_args
+            List.unzip ctor_args
         let ctor_args_terms_elaborated, ctor_args_costs = 
-            ctor_args_terms |> map elab_term
-                            |>  unzip
+            ctor_args_terms |> List.map elab_term
+                            |> List.unzip
         let ctor_args_elaborated : list< term * imp > = 
-            zip ctor_args_terms_elaborated 
-                ctor_args_imps 
+            List.zip ctor_args_terms_elaborated 
+                     ctor_args_imps 
         let construct_term = 
             mk_term_here <| Construct (ctor_name, ctor_args_elaborated)
-        let sum_ctor_args_cost = sum ctor_args_costs
-        let num_ctor_args = length ctor_args
+        let sum_ctor_args_cost = List.sum ctor_args_costs
+        let num_ctor_args = List.length ctor_args
         let construct_term_cost = sum_ctor_args_cost + num_ctor_args
         (construct_term, construct_term_cost)
     
@@ -256,14 +258,14 @@ let rec elab_term
             match whenClause with 
             | Some when_term -> failwith "Error: when clauses are not implemented yet."
             | None -> ()  
-        branches_when |> iter failOnWhenClause ;
+        branches_when |> List.iter failOnWhenClause ;
         
-        let branches_patterns_costs = branches_patterns |> map pat_cost
-        let sum_branches_patterns_costs = sum branches_patterns_costs
+        let branches_patterns_costs = branches_patterns |> List.map pat_cost
+        let sum_branches_patterns_costs = List.sum branches_patterns_costs
         let (branches_terms_elaborated : list<term>),
             (branches_terms_costs : list<int>) = 
-                 branches_terms |> map elab_term
-                                |>  unzip  
+                 branches_terms |> List.map elab_term
+                                |> List.unzip  
         let max_branch_cost = List.max branches_terms_costs
         let match_cost = e1_cost + sum_branches_patterns_costs + max_branch_cost
         let branches_elaborated : list<branch> = 
@@ -285,9 +287,9 @@ let rec elab_term
             | _ -> ((pat, term_elaborated), term_cost)
         
         let pattern_term_pairs_elaborated, term_costs = 
-            pattern_term_pairs |> map elab_pat_term_pair
-                               |> unzip
-        let sum_term_costs = sum term_costs
+            pattern_term_pairs |> List.map elab_pat_term_pair
+                               |> List.unzip
+        let sum_term_costs = List.sum term_costs
         let expr1_elaborated, expr1_cost = elab_term expr1
         let let_term = mk_term_here <| Let ( qualifier,
                                              pattern_term_pairs_elaborated,
@@ -301,14 +303,14 @@ let rec elab_term
            [ Record ( None, [(lid2,e2); (lid3,e3); ...; (lidn,en)] ) ]
             = [ { lid2=e2; lid3=e3; ...; lidn=en } ] *)
         
-        let num_fields = length fields
+        let num_fields = List.length fields
         let (field_names, field_terms) : (list<lid> * list<term>) = 
-            unzip fields      
+            List.unzip fields      
         let (fields_elaborated, fields_costs) : (list<term> * list<int>) = 
-            map elab_term field_terms 
-            |> unzip           
-        let fields_cost = sum fields_costs
-        let fields_elaborated = (field_names, fields_elaborated) ||> zip
+            List.map elab_term field_terms 
+            |> List.unzip           
+        let fields_cost = List.sum fields_costs
+        let fields_elaborated = (field_names, fields_elaborated) ||> List.zip
         let (e1_elaborated, e1_cost) : (option<term> * option<int>) = 
             match Option.map elab_term e1 with
             | Some (e1_cost, e1_elaborated) -> (Some e1_cost, Some e1_elaborated)
@@ -376,7 +378,7 @@ let is_lemma_tll : decl -> bool = function
 
     
 //elaborates a tll
-let elab_tll (qual,ls_pat_tms) = (qual, ls_pat_tms |> map(fun (p,t) -> check_pattern p; (p,elab_term_node t)))
+let elab_tll (qual,ls_pat_tms) = (qual, ls_pat_tms |> List.map(fun (p,t) -> check_pattern p; (p,elab_term_node t)))
 
 //elaborates a decl
 let elab_decl ({d=d} as decl) =
@@ -388,7 +390,7 @@ let elab_decl ({d=d} as decl) =
             TopLevelLet (elab_tll (q,p))
         | Tycon (is_effect, ls_tycons_optfsdocs) ->
             if is_effect then failwith "effect declarations are not currently permitted"
-            ls_tycons_optfsdocs |> iter(fun (tyc,_) -> check_tycon tyc);
+            ls_tycons_optfsdocs |> List.iter(fun (tyc,_) -> check_tycon tyc);
             d
         | Exception _ -> failwith "exceptions are not currently permitted"
         | NewEffect _ -> failwith "effect declarations are not currently permitted"
@@ -403,7 +405,7 @@ let name_of_decl : decl -> string = function
     | { d=Val(i, _) } -> i.idText
     | { d=TopLevelLet(_, pat_tm_pairs) } ->
         lids_of_let pat_tm_pairs 
-        |> map (fun l -> l.str) 
+        |> List.map (fun l -> l.str) 
         |> String.concat ", "
     | _ -> failwith "Please file a bug report: name_of_decl failed."
 
@@ -491,4 +493,3 @@ let ast_to_string ast =
     sw.Close();
     sb.ToString()
 
-*)
