@@ -7,3 +7,4 @@ packages
 .paket/Paket.Restore.targets
 paket-files
 
+.nupkg
