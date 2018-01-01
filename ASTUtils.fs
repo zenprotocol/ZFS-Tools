@@ -7,7 +7,7 @@ open FStar.Const
 
 module String = FSharpx.String
 
-type AST = modul list * (string * FStar.Range.range) list
+type AST = file * (string * FStar.Range.range) list
 
 (* parenthesises a term *)
 let paren tm = mk_term (Paren tm) tm.range tm.level
@@ -481,6 +481,9 @@ let add_main_to_ast (ast as module_, comments) =
 
 module PP = FStar.Pprint
 module TD = FStar.Parser.ToDocument
+
+let parse_file (filename:string) : AST =
+    FStar.Parser.Driver.parse_file filename
 
 let ast_to_string ast =
     let modules, _comments = ast
