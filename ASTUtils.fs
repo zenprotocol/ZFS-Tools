@@ -102,6 +102,29 @@ let rec check_pattern pat =
         if  reserved_names |> List.contains symbol then failwith ("Binding to \"" + symbol + "\" is not permitted.")
     | _ -> ();
 
+(* Gets the module name of an AST as a list of strings *)
+let get_module_name (ast as modul, _) : list<string> =
+    match modul with 
+    | Module (lid, _) 
+    | Interface (lid, _, _) -> lid.ns |> List.map (fun ident -> ident.idText) 
+
+(* Gets the module name of an AST as one string, with the dots included *)
+let get_module_name_str (ast as modul, _) : string =
+    match modul with 
+    | Module (lid, _) 
+    | Interface (lid, _, _) -> lid.nsstr
+
+(* Checks if a module name is OK. Users cannot declare modules with an FStar, Prims, ZFStar, or Zen prefix *)
+let check_module_name (ast : AST) : unit =
+    let reserved_names = [ "FStar"; "Prims"; "ZFStar"; "Zen" ]
+    let module_name = get_module_name ast
+    let check_module_name (module_name : list<string>) 
+                          (reserved_name : string) : unit =
+        if module_name |> List.contains reserved_name 
+        then failwith <| sprintf "Module names cannot contain the %s identifier" reserved_name
+        else ()
+    reserved_names |> List.iter (check_module_name module_name)
+
 let rec pat_cost {pat=pat} = 
     match pat with
     | PatWild
