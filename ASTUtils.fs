@@ -109,10 +109,8 @@ let get_module_name (ast as modul, _) : list<string> =
     | Interface (lid, _, _) -> lid.ns |> List.map (fun ident -> ident.idText) 
 
 (* Gets the module name of an AST as one string, with the dots included *)
-let get_module_name_str (ast as modul, _) : string =
-    match modul with 
-    | Module (lid, _) 
-    | Interface (lid, _, _) -> lid.nsstr
+let get_module_name_str : AST -> string =
+    get_module_name >> String.concat "."
 
 (* Checks if a module name is OK. Users cannot declare modules with an FStar, Prims, ZFStar, or Zen prefix *)
 let check_module_name (ast : AST) : unit =
