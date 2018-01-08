@@ -106,7 +106,7 @@ let rec check_pattern pat =
 let get_module_name (ast as modul, _) : list<string> =
     match modul with 
     | Module (lid, _) 
-    | Interface (lid, _, _) -> lid.ns |> List.map (fun ident -> ident.idText) 
+    | Interface (lid, _, _) -> lid.ns@[lid.ident] |> List.map (fun ident -> ident.idText) 
 
 (* Gets the module name of an AST as one string, with the dots included *)
 let get_module_name_str : AST -> string =
