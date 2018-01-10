@@ -54,6 +54,7 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="ASTUtils.fs" />
+    <Compile Include="Hints.fs" />
     <None Include="paket.references" />
   </ItemGroup>
   <PropertyGroup>
