@@ -357,9 +357,11 @@ let rec elab_term
         (if_term, if_term_cost)
         
     | LetOpen (module_name, expr) -> (* [let open module_name in expr] *)
-        let expr_elaborated = elab_term expr ||> mk_inc
-        let letopen_tm = mk_term_here <| LetOpen (module_name, expr_elaborated)
-        (letopen_tm, 0)
+        let expr_elaborated, expr_cost = elab_term expr
+        let letopen_tm = LetOpen (module_name, expr_elaborated)
+                         |> mk_term_here
+        (letopen_tm, expr_cost)
+    
     // try..with block; not currently permitted
     | TryWith _ -> failwith "try..with blocks are not currently permitted"
     | _ -> failwith ("unrecognised term" + branch.ToString() + ": please file a bug report")
