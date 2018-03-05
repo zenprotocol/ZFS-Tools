@@ -297,15 +297,15 @@ let rec elab_term
         (match_term, match_cost)
 
     | Let (qualifier, pattern_term_pairs, expr1) -> (* let [patterns] = [terms] in expr1 *)
-        let rec elab_pat_term_pair (pat, term) =
+        let rec elab_pat_term_pair (attr, (pat, term)) =
             let term_elaborated, term_cost = elab_term term
             match pat with
             | { pat=PatApp _ } -> // functions must have annotated cost
                 let inc_term_elaborated = mk_inc term_elaborated term_cost
-                ((pat, inc_term_elaborated), 0)
+                ((attr, (pat, inc_term_elaborated)), 0)
             | { pat=PatAscribed (pat', _) } -> //if the pattern has an ascription, retry with the ascribed pattern
-                elab_pat_term_pair (pat', term)
-            | _ -> ((pat, term_elaborated), term_cost)
+                elab_pat_term_pair (attr, (pat', term))
+            | _ -> (attr, (pat, term_elaborated)), term_cost
         
         let pattern_term_pairs_elaborated, term_costs = 
             pattern_term_pairs |> List.map elab_pat_term_pair
