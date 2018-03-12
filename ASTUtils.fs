@@ -186,19 +186,9 @@ let rec elab_term
         let tm_elabed, tm_cost = elab_term tm
         let project = mk_term_here <| Project (tm_elabed, lid)
         (project, 1 + tm_cost)
-    
-    | Abs ( ( [ { pat=PatVar (x, typ_opt) } ] as pat),
-            ( { tm=Match (maybe_x, branches) } as match_term ) )
-        when matches_var maybe_x x ->
-        (* Special case of [fun x -> match x with ...], 
-           To be handled as [function | ...].
-           F* uses this representation for [function]. 
-           Should really use a unique constructor... *)
-            let match_elaborated, match_cost = elab_term match_term
-            let function_term = mk_term_here <| Abs (pat, match_elaborated)
-            (function_term, match_cost)
             
-    | Abs (patterns, expr) -> // lambdas
+    | Abs (patterns, expr) ->
+        (* lambdas, eg. `fun [patterns] -> expr` *)
         let expr_elaborated = elab_term expr ||> mk_inc
         patterns |> List.iter check_pattern;
         let lambda_elaborated = mk_term_here <| Abs (patterns, expr_elaborated)
@@ -256,12 +246,27 @@ let rec elab_term
         let seq_tm_cost = expr1_cost + expr2_cost
         (seq_tm, seq_tm_cost)
     
-    | Bind (patn, expr1, expr2) -> (* Bind patterns, eg. [patn <-- expr1; expr2] *)
+    | Bind (patn, expr1, expr2) -> 
+        (* Bind patterns, eg. `let! patn = expr1 in expr2`
+           desugared as `bind expr1 (fun patn -> expr2)`,
+           using whichever `bind` is in scope. *)
         let expr1_elaborated, expr1_cost = elab_term expr1
-        let expr2_elaborated, expr2_cost = elab_term expr2
+        let expr2_elaborated = elab_term expr2 ||> mk_inc
         let bind_term = mk_term_here <| Bind (patn, expr1_elaborated, expr2_elaborated)
-        let bind_term_cost = 1 + expr1_cost + expr2_cost
+        let bind_term_cost = expr1_cost + 2
         (bind_term, bind_term_cost)
+    
+    | IfBind (i, t , e) -> 
+        (* `If! i then t else e`, 
+           desugared as `ifBang i (fun i' -> if i' then t else e)`
+           using whichever `ifBang` is in scope, and a fresh identifier for i'. *)
+        let i_elaborated, i_cost = elab_term i
+        let t_elaborated = elab_term t ||> mk_inc
+        let e_elaborated = elab_term e ||> mk_inc
+        let if_bind = mk_term_here <| IfBind(i_elaborated, t_elaborated, e_elaborated)
+        let if_bind_cost = i_cost + 5
+        (if_bind, if_bind_cost)
+        
     
     | Paren expr -> (* Parenthesized expression, ie. [(expr)] *)
         let expr_elaborated, expr_cost = elab_term expr
@@ -303,8 +308,10 @@ let rec elab_term
             | { pat=PatApp _ } -> // functions must have annotated cost
                 let inc_term_elaborated = mk_inc term_elaborated term_cost
                 ((attr, (pat, inc_term_elaborated)), 0)
-            | { pat=PatAscribed (pat', _) } -> //if the pattern has an ascription, retry with the ascribed pattern
+            | { pat=PatAscribed (pat', ascription) } -> 
+                //if the pattern has an ascription, retry with the ascribed pattern
                 elab_pat_term_pair (attr, (pat', term))
+                |> (fun ((attr, (pat', term)),cost) -> ((attr, (pat, term)),cost))
             | _ -> (attr, (pat, term_elaborated)), term_cost
         
         let pattern_term_pairs_elaborated, term_costs = 
