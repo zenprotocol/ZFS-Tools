@@ -12,4 +12,4 @@ NUGET
       FSharpx.Async
       FSharpx.Collections
     System.ValueTuple (4.3) - restriction: >= net45
-    ZFStar (0.0.10)
+    ZFStar (0.0.11)
