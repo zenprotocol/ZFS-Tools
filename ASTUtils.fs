@@ -236,7 +236,8 @@ let rec elab_term
             mk_term_here <| Construct (ctor_name, ctor_args_elaborated)
         let sum_ctor_args_cost = List.sum ctor_args_costs
         let num_ctor_args = List.length ctor_args
-        let construct_term_cost = sum_ctor_args_cost + num_ctor_args
+        let construct_term_cost =
+            sum_ctor_args_cost + num_ctor_args
         (construct_term, construct_term_cost)
     
     | Seq (expr1, expr2) -> (* Sequenced expression, eg. [expr1; expr2] *)
@@ -248,23 +249,22 @@ let rec elab_term
     
     | Bind (patn, expr1, expr2) -> 
         (* Bind patterns, eg. `let! patn = expr1 in expr2`
-           desugared as `bind expr1 (fun patn -> expr2)`,
-           using whichever `bind` is in scope. *)
+           desugared as `Zen.Cost.letBang expr1 (fun patn -> expr2)` *)
         let expr1_elaborated, expr1_cost = elab_term expr1
-        let expr2_elaborated = elab_term expr2 ||> mk_inc
+        let expr2_elaborated, expr2_cost = elab_term expr2
         let bind_term = mk_term_here <| Bind (patn, expr1_elaborated, expr2_elaborated)
-        let bind_term_cost = expr1_cost + 2
+        let bind_term_cost = expr1_cost + expr2_cost + 2
         (bind_term, bind_term_cost)
     
     | IfBind (i, t , e) -> 
         (* `If! i then t else e`, 
-           desugared as `ifBang i (fun i' -> if i' then t else e)`
-           using whichever `ifBang` is in scope, and a fresh identifier for i'. *)
+           desugared as `Zen.Cost.ifBang i (fun i' -> if i' then t else e)` *)
         let i_elaborated, i_cost = elab_term i
-        let t_elaborated = elab_term t ||> mk_inc
-        let e_elaborated = elab_term e ||> mk_inc
+        let t_elaborated, t_cost = elab_term t
+        let e_elaborated, e_cost = elab_term e
         let if_bind = mk_term_here <| IfBind(i_elaborated, t_elaborated, e_elaborated)
-        let if_bind_cost = i_cost + 5
+        let max_branch_cost = max t_cost e_cost
+        let if_bind_cost = i_cost + max_branch_cost + 3
         (if_bind, if_bind_cost)
         
     
