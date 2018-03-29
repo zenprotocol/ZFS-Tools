@@ -1,46 +1,67 @@
 module Hints
 
 open FStar.Util
-module M = FSharpx.Collections.Map
-
+open FSharpx.Functional.Prelude
+//module FSXL = FSharpx.Collections.List
+module FSXM = FSharpx.Collections.Map
 
 type Hint = hint
 type Hints = hints
 type HintsDB = hints_db
 
+let hint_name  (hint:Hint) : string = hint.hint_name
+let hint_fuel  (hint:Hint) : int    = hint.fuel
+let hint_ifuel (hint:Hint) : int    = hint.ifuel
+
+// Should use FSXL.catOptions, but https://github.com/fsprojects/FSharpx.Collections/issues/89
+let inline catOptions (xs:Option<'a> list) = List.choose id xs
+
 let read_hints: string -> option<HintsDB> = read_hints
 
 (* A map from names of terms to a list of it's hints *)
-type hintsMap = Map< string, list<Hint> >
+type HintsMap = Map< string, list<Hint> >
 
-let hints_to_hintsMap : Hints -> hintsMap =
-    let rec aux (hintsMap : hintsMap) : Hints -> hintsMap = function
-        | [] -> hintsMap
-        | None::hs -> aux hintsMap hs
-        | Some ({hint_name = hint_name} as h) :: hs -> 
-            let hintsMap' = hintsMap |> M.insertWith List.append hint_name [h]
-            aux hintsMap' hs
+let hints_to_hintsMap : Hints -> HintsMap =
+    catOptions
+    >> List.groupBy hint_name
+    >> Map.ofList
     
-    aux Map.empty
+(* The number of queries in a single hint *)
+let num_queries : Hint -> int = function
+    | {unsat_core = None} -> 0
+    | {unsat_core = Some unsatcores} -> List.length unsatcores
 
-(* Gets the fuel used by a given identifier *)
-let fuel_used (hintsMap : hintsMap) (ident : string) : int =
-    match Map.tryFind ident hintsMap with
-    | None -> 0
-    | Some hs -> hs |> List.sumBy (fun h -> h.fuel)
+(* The number of queries used by a single identifier *)
+let num_queries_ident (ident:string) : HintsMap -> option<int> =
+    Map.tryFind ident 
+    >> Option.map (List.sumBy num_queries)
 
-(* Gets the ifuel used by a given identifier *)
-let ifuel_used (hintsMap : hintsMap) (ident : string) : int =
-    match Map.tryFind ident hintsMap with
-    | None -> 0
-    | Some hs -> hs |> List.sumBy (fun h -> h.fuel)
+(* The total number of queries used by all hints *)
+let total_num_queries : HintsMap -> int =
+    Map.toList 
+    >> List.collect snd 
+    >> List.sumBy num_queries
+
+(* Gets the fuel used by a single identifier *)
+let query_fuel (ident : string) : HintsMap -> option<int> =
+    Map.tryFind ident
+    >> Option.map (List.sumBy hint_fuel)
+
+(* The total fuel used by all hints *)
+let total_fuel : HintsMap -> int =
+    Map.toList
+    >> List.collect snd
+    >> List.sumBy hint_fuel
+
+(* Gets the ifuel used by a single identifier *)
+let query_ifuel (ident : string) : HintsMap -> option<int> =
+    Map.tryFind ident
+    >> Option.map (List.sumBy hint_ifuel)
+
+(* The total ifuel used by all hints *)
+let total_ifuel : HintsMap -> int =
+    Map.toList
+    >> List.collect snd
+    >> List.sumBy hint_ifuel
     
-let z3_queries_used (hintsMap : hintsMap) (function_name : string) : int =
-    let num_queries : Hint -> int = function 
-        | {unsat_core = None} -> 0
-        | {unsat_core = Some uc} -> List.length uc 
     
-    match Map.tryFind function_name hintsMap with
-    | None -> 0
-    | Some hs -> hs |> List.sumBy num_queries
-
