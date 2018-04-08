@@ -38,13 +38,13 @@ let qual_ns_ident (nsstr:string) (ident:ident) : lid =
 (* equivalent to add_ns_ident, where the second argument is a string. *)
 let qual_ns_str (nsstr:string): string -> lid = id_of_text >> qual_ns_ident nsstr
 
-(* Increments an applied function by n if 0 < n. eg x => (inc (x) n) *)
+(* Increments an applied function by n if 0 < n. eg x => (inc n (x)) *)
 let mk_inc (expr:term) n =
     if n < 0 then failwith "Error: negative increments should be impossible"
     else match n with
          | 0 -> expr
          | _ -> let inc = mk_tm_at Var (qual_ns_str "Zen.Cost" "inc") expr
-                mkExplicitApp inc [paren expr; mk_int_at n expr] expr.range 
+                mkExplicitApp inc [mk_int_at n expr; paren expr] expr.range 
                 |> paren
 
 // These names are not permitted to be bound in a user module

@@ -16,8 +16,6 @@ let hint_ifuel (hint:Hint) : int    = hint.ifuel
 // Should use FSXL.catOptions, but https://github.com/fsprojects/FSharpx.Collections/issues/89
 let inline catOptions (xs:Option<'a> list) = List.choose id xs
 
-let read_hints: string -> option<HintsDB> = read_hints
-
 (* A map from names of terms to a list of it's hints *)
 type HintsMap = Map< string, list<Hint> >
 
@@ -25,6 +23,13 @@ let hints_to_hintsMap : Hints -> HintsMap =
     catOptions
     >> List.groupBy hint_name
     >> Map.ofList
+
+let read_hints: string -> option<HintsMap> = 
+    read_hints
+    >> Option.map (fun {hints=hints} -> hints_to_hintsMap hints)
+
+let sumBy (f: Hint -> int) : HintsMap -> int =
+    Map.fold (fun count _ hints -> count + List.sumBy f hints) 0
     
 (* The number of queries in a single hint *)
 let num_queries : Hint -> int = function
@@ -38,9 +43,7 @@ let num_queries_ident (ident:string) : HintsMap -> option<int> =
 
 (* The total number of queries used by all hints *)
 let total_num_queries : HintsMap -> int =
-    Map.toList 
-    >> List.collect snd 
-    >> List.sumBy num_queries
+    sumBy num_queries
 
 (* Gets the fuel used by a single identifier *)
 let query_fuel (ident : string) : HintsMap -> option<int> =
@@ -49,9 +52,7 @@ let query_fuel (ident : string) : HintsMap -> option<int> =
 
 (* The total fuel used by all hints *)
 let total_fuel : HintsMap -> int =
-    Map.toList
-    >> List.collect snd
-    >> List.sumBy hint_fuel
+    sumBy hint_fuel
 
 (* Gets the ifuel used by a single identifier *)
 let query_ifuel (ident : string) : HintsMap -> option<int> =
@@ -60,8 +61,6 @@ let query_ifuel (ident : string) : HintsMap -> option<int> =
 
 (* The total ifuel used by all hints *)
 let total_ifuel : HintsMap -> int =
-    Map.toList
-    >> List.collect snd
-    >> List.sumBy hint_ifuel
+    sumBy hint_ifuel
     
     
