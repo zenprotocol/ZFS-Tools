@@ -1,8 +1,10 @@
 NUGET
   remote: https://www.nuget.org/api/v2
     FSharp.Compiler.Tools (4.1.23) - restriction: >= net45
-    FSharp.Control.AsyncSeq (2.0.18)
-    FSharp.Core (4.1.18)
+    FSharp.Control.AsyncSeq (2.0.21)
+      FSharp.Core (>= 3.1.2) - restriction: >= net45
+      FSharp.Core (>= 4.3.2) - restriction: && (< net45) (>= netstandard2.0)
+    FSharp.Core (4.3.4)
     FSharpx.Async (1.13.2)
       FSharp.Control.AsyncSeq
       FSharp.Core
@@ -12,4 +14,4 @@ NUGET
       FSharpx.Async
       FSharpx.Collections
     System.ValueTuple (4.3) - restriction: >= net45
-    ZFStar (0.0.16)
+    ZFStar (0.0.17)
