@@ -228,7 +228,7 @@ and check_branch: branch -> unit = function
     | (pattern, None, term) -> check_pattern pattern; check_term term
 
 let check_module_abbrev ({idText=abbrev}: ident) : unit =
-    if is_reserved_module_abbrev abbrev then () 
+    if not ^ is_reserved_module_abbrev abbrev then () 
     else failwithf "\"%s\" is not permitted as a module abbreviation." abbrev
 
 let module_name_ok: list<string> -> bool =
