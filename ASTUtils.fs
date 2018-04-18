@@ -1,26 +1,52 @@
 module ASTUtils
 
+open FSharpx
 open System
 open FStar.Parser.AST
 open FStar.Ident
 open FStar.Const
+open FSharpx.Functional.Prelude
+open FStar.Range
 
 module String = FSharpx.String
 
 type AST = file * (string * FStar.Range.range) list
 
+let mapFst (f: 'a -> 'c) (fst: 'a, snd: 'b) : 'c * 'b = 
+    f fst, snd
+let mapSnd (f: 'b -> 'c) (fst: 'a, snd: 'b) : 'a * 'c =
+    fst, f snd 
+
+let string_of_path : path -> string = String.concat "."
+let string_of_lid  : lid  -> string = path_of_lid >> string_of_path
+
+let lid_of_module: modul -> lid = function
+    | Module (lid, _)
+    | Interface(lid, _, _) -> lid
+
+let decls_of_modul: modul -> list<decl> = function
+    | Module(_, decls)
+    | Interface(_, decls, _) -> decls
+
+(* Gets the module name of an AST as a string *)
+let get_module_lid : AST -> lid = lid_of_module << fst
+
+let get_module_name: AST -> string = get_module_lid >> string_of_lid
+
 (* parenthesises a term *)
 let paren tm = mk_term (Paren tm) tm.range tm.level
 
-(* constructs a term by applying constructor at x, at the range and level of tm. 
+(* constructs a term at the range and level of the first argument. 
    eg. mk_term_at Paren (tm1:term) tm1 => (tm1) *)
-let mk_tm_at (constructor: 'a -> term') (x:'a) (tm:term) : term =
-    mk_term (constructor x) tm.range tm.level
+let mk_term_at ({range=range; level=level}: term) (term':term') : term =
+    mk_term term' range level
 
 (* converts an integer n to an unsigned integer literal at the level of the second argument. *)
-let mk_int_at (n:int) : term -> term = 
-    mk_tm_at Const (Const_int (n.ToString(), None))
-
+let mk_int_at (term:term) (n:int) : term = 
+    Const_int(string n, None)
+    |> Const
+    |> mk_term_at term
+    
 (*  qualifies ident with nsstr as a namespace. 
     nsstr is of the form "Ab.Bc.Cd.De..." where each namespace identifier must begin with an uppercase.
     eg. add_ns_ident "Foo.Bar" baz => Foo.Bar.baz *)
@@ -38,90 +64,211 @@ let qual_ns_ident (nsstr:string) (ident:ident) : lid =
 (* equivalent to add_ns_ident, where the second argument is a string. *)
 let qual_ns_str (nsstr:string): string -> lid = id_of_text >> qual_ns_ident nsstr
 
-(* Increments an applied function by n if 0 < n. eg x => (inc n (x)) *)
-let mk_inc (expr:term) n =
-    if n < 0 then failwith "Error: negative increments should be impossible"
-    else match n with
-         | 0 -> expr
-         | _ -> let inc = mk_tm_at Var (qual_ns_str "Zen.Cost" "inc") expr
-                mkExplicitApp inc [mk_int_at n expr; paren expr] expr.range 
-                |> paren
-
-// These names are not permitted to be bound in a user module
-let reserved_names =
-    ["cost";"Cost";
-    "ret";"Ret";
-    "hide";"Hide";
-    "inc";"+!";"!+";
-    "op_Plus_Bang";"op_Bang_Plus";
-    ">>=";">>==";
-    "op_Greater_Greater_Equals";"op_Greater_Greater_Equals_Equals";
-    "=<<";"==<<";
-    "op_Equals_Less_Less";"op_Equals_Equals_Less_Less";
-    "+";"-";"*";"/";
-    "op_Plus";"op_Minus";"op_Star";"op_Slash";
-    "log";"flog";"clog";"exp";"pown";"pow";"logkn"]
+(* Increments a term by n. eg x => (inc n (x)) *)
+let mk_inc (term:term, n:int) : term =
+    if n < 0
+        then failwith "Negative increments should be impossible"
+    elif n = 0
+        then term
+    else
+        let n = n |> mk_int_at term
+        let inc = qual_ns_str "Zen.Cost" "inc"
+                  |> Var
+                  |> mk_term_at term
+        mkExplicitApp inc [n; paren term] term.range
+        |> paren
 
 (* similar of FStar.Parser.ToDocument.unparen, since the .fsi does not expose it *)
-let rec unparen = function
+let rec unparen: term -> term = function
   | {tm=Paren t} -> unparen t
   | t -> t
 
-(* clone of FStar.Parser.ToDocument.matches_var, since the .fsi does not expose it *)
-let matches_var t x =
-    match (unparen t).tm with
-        | Var y -> x.idText = text_of_lid y
-        | _ -> false
+(******************************************************************************)
+(* Checking Idents                                                            *)
+(******************************************************************************)
 
-let check_ident ident =
-    if reserved_names |> List.contains ident.idText 
-    then failwith ("Binding to \"" + ident.idText + "\" is not permitted.")
-    else ();
-// Fails if a declaration uses a name from the cost library, otherwise returns pat.
-let rec check_pattern pat =
-    match pat.pat with
-    | PatApp (p1, ls_pat) ->
-        check_pattern p1;
-        ls_pat |> List.iter (fun p -> check_pattern p);
-    | PatName lid -> // What is this?
-        check_ident lid.ident
-    | PatVar (ident,_)
-    | PatTvar (ident,_) -> // What is this? Looks like a PatVar to me
+let fsharpkeywords : Set<string> = 
+    Set.ofList FStar.Extraction.ML.Syntax.fsharpkeywords
+
+let is_reserved_name (name: string) : bool =
+    fsharpkeywords
+    |> Set.contains name
+
+let is_potential_cli_conflict s =
+       String.startsWith "get_" s
+    || String.startsWith "set_" s
+
+let reserved_module_names = ["FStar"; "Prims"; "Zen"; "ZFStar"]
+
+let is_reserved_module_abbrev (abbrev: string) : bool =
+    reserved_module_names
+    |> List.contains abbrev
+
+let check_name (s: string) : unit =
+    if is_reserved_name s
+        then failwithf "\"%s\" is not permitted as an identifier" s
+    elif is_potential_cli_conflict s
+        then failwith "Identifiers may not start with \"get_\" or \"set_\""
+    else ()
+
+let check_ident : ident -> unit =
+    check_name << text_of_id
+
+let check_const: sconst -> unit = function
+    | Const_effect -> failwith "unexpected Const_effect in pattern"
+    | Const_reify -> failwith "unexpected reify in pattern"
+    | Const_reflect _ -> failwith "unexpected reflect in pattern"
+    | _ -> ()
+
+let rec check_pattern ({pat=pat}: pattern) : unit = 
+    match pat with
+    | PatWild -> ()
+    | PatConst c -> check_const c
+    | PatApp (p, ps) ->
+        check_pattern p;
+        ps |> List.iter check_pattern
+    | PatVar(ident, _)
+    | PatTvar(ident, _) -> check_ident ident
+    | PatName _ -> ()
+    | PatList pats
+    | PatTuple(pats, _)
+    | PatVector pats
+    | PatOr pats ->
+        pats |> List.iter check_pattern
+    | PatRecord pats ->
+        pats |> List.iter (check_pattern << snd)
+    | PatAscribed (p,_) -> check_pattern p
+    | PatOp ident ->
         check_ident ident
-    | PatList ls_pat
-    | PatTuple (ls_pat, _)
-    | PatOr ls_pat -> // What is this?
-        ls_pat |> List.iter (fun p -> check_pattern p);
-    | PatRecord ls_lid_pat -> // When does this occur?
-        ls_lid_pat |> List.iter (fun (l,p) ->
-                        check_ident l.ident;
-                        check_pattern p);
-    | PatAscribed (p1,_) -> check_pattern p1;
-    | PatOp op_ident ->
-        let symbol = op_ident.idText
-        if  reserved_names |> List.contains symbol then failwith ("Binding to \"" + symbol + "\" is not permitted.")
-    | _ -> ();
 
-(* Gets the module name of an AST as a list of strings *)
-let get_module_name (ast as modul, _) : list<string> =
-    match modul with 
-    | Module (lid, _) 
-    | Interface (lid, _, _) -> lid.ns@[lid.ident] |> List.map (fun ident -> ident.idText) 
+let check_binder ({b=binder}: binder) = 
+    match binder with
+    | Variable ident
+    | TVariable ident
+    | Annotated(ident, _)
+    | TAnnotated(ident, _) -> check_ident ident
+    | NoName _ -> ()
 
-(* Gets the module name of an AST as one string, with the dots included *)
-let get_module_name_str : AST -> string =
-    get_module_name >> String.concat "."
+let check_tycon tycon =
+    match tycon with
+    | TyconAbstract(ident, binders, _)
+    | TyconAbbrev(ident, binders, _, _) ->
+        check_ident ident;
+        binders |> List.iter check_binder
+    | TyconRecord   (ident, binders, _, fields) ->
+        check_ident ident;
+        binders |> List.iter check_binder;
+        fields  |> List.iter(fun (ident, _, _) -> check_ident ident)
+    | TyconVariant  (ident, binders, _, fields) ->
+        check_ident ident;
+        binders |> List.iter check_binder;
+        fields  |> List.iter(fun (ident, _, _, _) -> check_ident ident)
 
-(* Checks if a module name is OK. Users cannot declare modules with an FStar, Prims, ZFStar, or Zen prefix *)
-let check_module_name (ast : AST) : unit =
-    let reserved_names = [ "FStar"; "Prims"; "ZFStar"; "Zen" ]
-    let module_name = get_module_name ast
-    let check_module_name (module_name : list<string>) 
-                          (reserved_name : string) : unit =
-        if module_name |> List.contains reserved_name 
-        then failwith <| sprintf "Module names cannot contain the %s identifier" reserved_name
-        else ()
-    reserved_names |> List.iter (check_module_name module_name)
+let rec check_term ({tm=term}: term) : unit =
+    match term with
+    | Wild -> ()
+    | Const c -> check_const c
+    | Op(_, terms) -> terms |> List.iter check_term
+    | Tvar _
+    | Uvar _
+    | Var _
+    | Name _
+    | Projector _ -> ()
+    | Construct(_, terms) -> terms |> List.iter (check_term << fst) 
+    | Abs(pats, term) -> pats |> List.iter check_pattern;
+                         check_term term
+    | App(term1, term2, _) -> check_term term1; check_term term2
+    | Let(Mutable, _, _) -> failwith "Mutation is not permitted."
+    | Let(_, letbindings, term) ->
+        letbindings 
+        |> List.iter begin function 
+                     | (Some _, _) -> failwith "Attributes are not permitted."
+                     | (None, (pattern, term)) -> check_pattern pattern;
+                                                  check_term term 
+                     end
+        check_term term
+    | LetOpen(_, term) -> check_term term
+    | Seq(term1, term2) -> check_term term1; check_term term2
+    | Bind(pat, term1, term2) -> check_pattern pat; 
+                                 check_term term1; 
+                                 check_term term2
+    | If(term1, term2, term3)
+    | IfBind(term1, term2, term3) -> check_term term1;
+                                     check_term term2;
+                                     check_term term3 
+    | Match(term, branches) -> check_term term; 
+                               branches |> List.iter check_branch
+    | TryWith _ -> failwith "Try ... with ... is not currently implemented."
+    | Ascribed(term1, term2, term3) -> check_term term1;
+                                       check_term term2;
+                                       term3 |> Option.iter check_term 
+    | Record(term, fields) -> term |> Option.iter check_term;
+                              fields |> List.iter (check_term << snd)
+    | Project(term, _) -> check_term term
+    | Product(binders, term)
+    | Sum(binders, term) -> binders |> List.iter check_binder;
+                                check_term term
+    | QForall(binders, terms, term)
+    | QExists(binders, terms, term) -> 
+        binders |> List.iter check_binder;
+        terms |> (List.iter check_term << List.concat);
+        check_term term
+    | Refine(binder, term) -> check_binder binder; check_term term
+    | NamedTyp(ident, term) -> check_ident ident; check_term term
+    | Paren term -> check_term term
+    | Requires(term, _)
+    | Ensures(term,_ ) -> check_term term
+    | Labeled(term, _, _) -> check_term term
+    | Discrim _ -> ()
+    | Attributes _ -> failwith "Attributes are not permitted."
+    | Assign _ -> failwith "Assigns are not permitted" 
+    
+and check_branch: branch -> unit = function
+    | (_, Some _, _) -> failwith "When clauses are not currently implemented." 
+    | (pattern, None, term) -> check_pattern pattern; check_term term
+
+let check_module_abbrev ({idText=abbrev}: ident) : unit =
+    if is_reserved_module_abbrev abbrev then () 
+    else failwithf "\"%s\" is not permitted as a module abbreviation." abbrev
+
+let module_name_ok: list<string> -> bool =
+    not << List.exists (flip List.contains reserved_module_names)
+    
+let check_module_lid (lid:lid): unit =
+    if module_name_ok ^ path_of_lid lid then ()
+    else failwith "`%s` is not permitted as a module name" ^ string_of_lid lid
+
+let check_decl ({d=decl}: decl) =
+    match decl with
+    | TopLevelModule lid -> check_module_lid lid
+    | Open _ -> ()
+    | Include _ -> failwith "Includes are not permitted."
+    | ModuleAbbrev(abbrev, _) -> check_module_abbrev abbrev
+    | TopLevelLet(Mutable, _) -> failwith "Mutation is not permitted."
+    | TopLevelLet(_, letBindings) ->
+        letBindings |>! List.iter (check_pattern << fst)
+                    |>  List.iter (check_term << snd)  
+    | Main _ -> failwith "Unexpected: Main decl"
+    | Tycon(true, _) -> failwith "User-defined effects are not permitted."
+    | Tycon(false, tycons) -> tycons |> List.iter (check_tycon << fst) 
+    | Val(_, v) -> check_term v
+    | Exception _ -> failwith "User-defined exceptions are not permitted."
+    | NewEffect _
+    | SubEffect _ -> failwith "User-defined effects are not permitted."
+    | Pragma _ -> failwith "Pragmas are not permitted."
+    | Fsdoc _ -> ()
+    | Assume _ -> failwith "Assumes are not permitted."
+
+let check_module (modul: modul): unit =
+    modul
+    |>! (check_module_lid << lid_of_module)
+    |>  (List.iter check_decl << decls_of_modul)
+
+let check_ast: AST -> unit = check_module << fst
+
+(******************************************************************************)
+(* Cost Elaboration                                                           *)
+(******************************************************************************)
 
 let rec pat_cost {pat=pat} = 
     match pat with
@@ -180,23 +327,23 @@ let rec elab_term
     | Var _  (* Variable names [lident1, lident2, Foo.Bar.baz] *)
     | Name _ (* Non-variable names; begin with uppercase. [Lident1, Foo.Bar.Baz] *)
         -> (branch, 0)
-    | Projector (tm',lid) -> // terms like Cons?.hd, NOT THE SAME AS "Project"
-        (branch, 1)   
+    | Projector (_, _) -> // terms like Cons?.hd, NOT THE SAME AS "Project"
+        (branch, 1) 
     | Project (tm,lid) -> // terms like tm.lid
         let tm_elabed, tm_cost = elab_term tm
-        let project = mk_term_here <| Project (tm_elabed, lid)
+        let project = Project (tm_elabed, lid) |> mk_term_here
         (project, 1 + tm_cost)
             
     | Abs (patterns, expr) ->
         (* lambdas, eg. `fun [patterns] -> expr` *)
-        let expr_elaborated = elab_term expr ||> mk_inc
-        patterns |> List.iter check_pattern;
-        let lambda_elaborated = mk_term_here <| Abs (patterns, expr_elaborated)
+        let expr_elaborated = elab_term expr |> mk_inc
+        let lambda_elaborated = Abs (patterns, expr_elaborated) |> mk_term_here
         (lambda_elaborated, 0)
     
     | Ascribed (expr1, expr2, None) -> (* [expr1 <: expr2] *)
         let expr1_elaborated, expr1_cost = elab_term expr1
-        let ascribed_elaborated = mk_term_here <| Ascribed (expr1_elaborated, expr2, None)
+        let ascribed_elaborated = Ascribed (expr1_elaborated, expr2, None) 
+                                  |> mk_term_here
         (ascribed_elaborated, expr1_cost)
         
     | Op (op_name, args:list<term>) ->
@@ -206,7 +353,7 @@ let rec elab_term
         let args_elaborated, args_costs = 
             args |> List.map elab_term
                  |> List.unzip
-        let op_term = mk_term_here <| Op (op_name, args_elaborated)
+        let op_term = Op (op_name, args_elaborated) |> mk_term_here
         let sum_args_cost = List.sum args_costs
         let num_args = List.length args
         let op_term_cost = num_args + sum_args_cost
@@ -215,8 +362,8 @@ let rec elab_term
     | App (expr1, expr2, imp) -> (* Application, eg. [expr1 (expr2)] *)
         let expr1_elaborated, expr1_cost = elab_term expr1
         let expr2_elaborated, expr2_cost = elab_term expr2
-        let app_term = 
-            mk_term_here <| App (expr1_elaborated, expr2_elaborated, imp)
+        let app_term = App (expr1_elaborated, expr2_elaborated, imp)
+                       |> mk_term_here
         let app_term_cost = 1 + expr1_cost + expr2_cost
         (app_term, app_term_cost)
     
@@ -232,8 +379,8 @@ let rec elab_term
         let ctor_args_elaborated : list< term * imp > = 
             List.zip ctor_args_terms_elaborated 
                      ctor_args_imps 
-        let construct_term = 
-            mk_term_here <| Construct (ctor_name, ctor_args_elaborated)
+        let construct_term = Construct (ctor_name, ctor_args_elaborated)
+                             |> mk_term_here
         let sum_ctor_args_cost = List.sum ctor_args_costs
         let num_ctor_args = List.length ctor_args
         let construct_term_cost =
@@ -243,7 +390,7 @@ let rec elab_term
     | Seq (expr1, expr2) -> (* Sequenced expression, eg. [expr1; expr2] *)
         let expr1_elaborated, expr1_cost = elab_term expr1
         let expr2_elaborated, expr2_cost = elab_term expr2
-        let seq_tm = mk_term_here <| Seq (expr1_elaborated, expr2_elaborated)
+        let seq_tm = Seq (expr1_elaborated, expr2_elaborated) |> mk_term_here
         let seq_tm_cost = expr1_cost + expr2_cost
         (seq_tm, seq_tm_cost)
     
@@ -252,7 +399,8 @@ let rec elab_term
            desugared as `Zen.Cost.letBang expr1 (fun patn -> expr2)` *)
         let expr1_elaborated, expr1_cost = elab_term expr1
         let expr2_elaborated, expr2_cost = elab_term expr2
-        let bind_term = mk_term_here <| Bind (patn, expr1_elaborated, expr2_elaborated)
+        let bind_term = Bind (patn, expr1_elaborated, expr2_elaborated)
+                        |> mk_term_here
         let bind_term_cost = expr1_cost + expr2_cost + 2
         (bind_term, bind_term_cost)
     
@@ -262,7 +410,8 @@ let rec elab_term
         let i_elaborated, i_cost = elab_term i
         let t_elaborated, t_cost = elab_term t
         let e_elaborated, e_cost = elab_term e
-        let if_bind = mk_term_here <| IfBind(i_elaborated, t_elaborated, e_elaborated)
+        let if_bind = IfBind(i_elaborated, t_elaborated, e_elaborated)
+                      |> mk_term_here
         let max_branch_cost = max t_cost e_cost
         let if_bind_cost = i_cost + max_branch_cost + 3
         (if_bind, if_bind_cost)
@@ -270,7 +419,7 @@ let rec elab_term
     
     | Paren expr -> (* Parenthesized expression, ie. [(expr)] *)
         let expr_elaborated, expr_cost = elab_term expr
-        let paren_term = mk_term_here <| Paren expr_elaborated
+        let paren_term = Paren expr_elaborated |> mk_term_here
         (paren_term, expr_cost)
 
     | Match (e1, branches) -> (* match e1 with | branches [0] | branches [1] ... | branches [last] *)
@@ -279,12 +428,6 @@ let rec elab_term
             (branches_when : list<( option<term> )>), // optional when clause, currently not enabled
             (branches_terms : list<term>) = // the term in each branch
                 List.unzip3 branches
-        
-        let failOnWhenClause (whenClause : option<term>) = // fail on when clauses
-            match whenClause with 
-            | Some when_term -> failwith "Error: when clauses are not implemented yet."
-            | None -> ()  
-        branches_when |> List.iter failOnWhenClause ;
         
         let branches_patterns_costs = branches_patterns |> List.map pat_cost
         let sum_branches_patterns_costs = List.sum branches_patterns_costs
@@ -298,7 +441,8 @@ let rec elab_term
             List.zip3 branches_patterns 
                       branches_when 
                       branches_terms_elaborated
-        let match_term = mk_term_here <| Match (e1_elaborated, branches_elaborated)
+        let match_term = Match (e1_elaborated, branches_elaborated) 
+                         |> mk_term_here
         (match_term, match_cost)
 
     | Let (qualifier, pattern_term_pairs, expr1) -> (* let [patterns] = [terms] in expr1 *)
@@ -306,12 +450,12 @@ let rec elab_term
             let term_elaborated, term_cost = elab_term term
             match pat with
             | { pat=PatApp _ } -> // functions must have annotated cost
-                let inc_term_elaborated = mk_inc term_elaborated term_cost
+                let inc_term_elaborated = mk_inc (term_elaborated, term_cost)
                 ((attr, (pat, inc_term_elaborated)), 0)
-            | { pat=PatAscribed (pat', ascription) } -> 
+            | { pat=PatAscribed (pat', _) } -> 
                 //if the pattern has an ascription, retry with the ascribed pattern
                 elab_pat_term_pair (attr, (pat', term))
-                |> (fun ((attr, (pat', term)),cost) -> ((attr, (pat, term)),cost))
+                |> fun ((attr, (_, term)),cost) -> (attr, (pat, term)), cost
             | _ -> (attr, (pat, term_elaborated)), term_cost
         
         let pattern_term_pairs_elaborated, term_costs = 
@@ -319,9 +463,9 @@ let rec elab_term
                                |> List.unzip
         let sum_term_costs = List.sum term_costs
         let expr1_elaborated, expr1_cost = elab_term expr1
-        let let_term = mk_term_here <| Let ( qualifier,
-                                             pattern_term_pairs_elaborated,
-                                             expr1_elaborated )
+        let let_term = mk_term_here ^ Let ( qualifier,
+                                            pattern_term_pairs_elaborated,
+                                            expr1_elaborated )
         let let_cost = sum_term_costs + expr1_cost
         (let_term, let_cost)
             
@@ -347,7 +491,8 @@ let rec elab_term
             match e1_cost with
             | None -> num_fields + fields_cost
             | Some e1_cost -> num_fields + e1_cost + fields_cost
-        let record_term = mk_term_here <| Record (e1_elaborated, fields_elaborated)
+        let record_term = Record (e1_elaborated, fields_elaborated)
+                          |> mk_term_here
         (record_term, record_cost)
         
     | If (cond_branch, then_branch, else_branch) ->
@@ -370,19 +515,12 @@ let rec elab_term
         (letopen_tm, expr_cost)
     
     // try..with block; not currently permitted
-    | TryWith _ -> failwith "try..with blocks are not currently permitted"
+    | TryWith _ -> failwith "try..with blocks are not currently implemented."
     | _ -> failwith ("unrecognised term" + branch.ToString() + ": please file a bug report")
 
 (* Attaches an increment to tm. tm => inc tm n *)
 let elab_term_node node =
-    elab_term node ||> mk_inc
-
-let check_tycon tycon =
-    match tycon with
-    | TyconAbstract (ident, _, _)
-    | TyconAbbrev   (ident, _, _, _)
-    | TyconRecord   (ident, _, _, _)
-    | TyconVariant  (ident, _, _, _) -> check_ident ident;
+    elab_term node |> mk_inc
 
 let is_lemma_lid : lid -> bool = function
     | { ns=[]; ident={idText="Lemma"}; nsstr=""; str="Lemma" } -> true
@@ -404,11 +542,7 @@ let is_lemma_pat : pattern' -> bool = function
 let is_lemma_tll : decl -> bool = function
     | { d=TopLevelLet(_, [{pat=tll_patn}, _]) } -> // TODO: Should we allow recursion-recursion here?
             is_lemma_pat tll_patn
-    | _ -> false    
-
-    
-//elaborates a tll
-let elab_tll (qual,ls_pat_tms) = (qual, ls_pat_tms |> List.map(fun (p,t) -> check_pattern p; (p,elab_term_node t)))
+    | _ -> false
 
 //elaborates a decl
 let elab_decl ({d=d} as decl) =
@@ -416,12 +550,13 @@ let elab_decl ({d=d} as decl) =
         match d with
         | Main tm -> Main (elab_term_node tm)
         | TopLevelLet (q,p) -> 
-            if is_lemma_tll decl then d else // Do not elaborate lemmas
-            TopLevelLet (elab_tll (q,p))
-        | Tycon (is_effect, ls_tycons_optfsdocs) ->
-            if is_effect then failwith "effect declarations are not currently permitted"
-            ls_tycons_optfsdocs |> List.iter(fun (tyc,_) -> check_tycon tyc);
-            d
+            if is_lemma_tll decl then d 
+            else // Do not elaborate lemmas
+                p |> List.map (mapSnd elab_term_node)
+                  |> tuple2 q
+                  |> TopLevelLet
+        | Tycon (false, _) -> d
+        | Tycon (true, _) -> failwith "effect declarations are not currently permitted"
         | Exception _ -> failwith "exceptions are not currently permitted"
         | NewEffect _ -> failwith "effect declarations are not currently permitted"
         | SubEffect _ -> failwith "effect declarations are not currently permitted"
@@ -456,18 +591,18 @@ let rec elab_decls : list<decl> -> list<decl> = function
                         
 let main_decl_val range = (* [val mainFunction : Zen.Types.mainFunction] *)
     let main_ident = id_of_text "mainFunction"
-    let main_decl_val_term' = Var <| qual_ns_str "Zen.Types" "mainFunction"
+    let main_decl_val_term' = Var ^ qual_ns_str "Zen.Types" "mainFunction"
     let main_decl_val_term = mk_term main_decl_val_term' range Type_level
     let main_decl'_val = Val (main_ident, main_decl_val_term)
     { d=main_decl'_val; drange=range; doc=None; quals=[]; attrs=[] }
 
 let main_decl_let range = (* [let mainFunction = MainFunc (CostFunc cf) main] *)     
     let main_ident = id_of_text "main"
-    let main_term' = Var <| lid_of_ns_and_id [] main_ident
+    let main_term' = Var ^ lid_of_ns_and_id [] main_ident
     let main_term = mk_term main_term' range Expr
     
     let cf_ident = id_of_text "cf"
-    let cf_term' = Var <| lid_of_ns_and_id [] cf_ident
+    let cf_term' = Var ^ lid_of_ns_and_id [] cf_ident
     let cf_term = mk_term cf_term' range Expr
     
     let costFunc_term' = Construct (qual_ns_str "Zen.Types" "CostFunc", [cf_term, Nothing])
@@ -503,28 +638,34 @@ let add_main_decl : modul -> modul = function
     | Interface (lid, decls, bool) -> 
         Interface (lid, decls @ main_decls, bool)
 
-let elab_ast (ast as module_, comments) =
-    (elab_module module_, comments)
+let elab_ast : AST -> AST =
+    mapFst elab_module
 
-let add_main_to_ast (ast as module_, comments) =
-    (add_main_decl module_, comments)
+let add_main_to_ast : AST -> AST =
+    mapFst add_main_decl
+
+(******************************************************************************)
+(* Printing                                                                   *)
+(******************************************************************************)
 
 module PP = FStar.Pprint
 module TD = FStar.Parser.ToDocument
 
+let string_of_doc: PP.document -> string =
+    PP.pretty_string 1.0 100
+
 let parse_file (filename:string) : AST =
     FStar.Parser.Driver.parse_file filename
 
-let ast_to_string ast =
-    let modules, _comments = ast
-    let modul = List.head modules
-    let doc, comments = TD.modul_with_comments_to_document modul _comments
-    let sb = new Text.StringBuilder();
-    let sw = new IO.StringWriter(sb);
-    PP.pretty_out_channel 1.0 100 doc sw;
-    sw.Flush();
-    sw.Close();
-    sb.ToString()
+let modul_to_string: modul -> string =
+    TD.modul_to_document >> string_of_doc
+
+let ast_to_doc : AST -> PP.document =
+    uncurry TD.modul_with_comments_to_document
+    >> fst
+
+let ast_to_string: AST -> string =
+    ast_to_doc >> string_of_doc
 
 // prints a module to a specified output channel
 let print_modul' : modul -> FStar.Util.out_channel -> unit = 
@@ -535,18 +676,14 @@ let print_modul (m:modul) : unit =
     print_modul' m stdout
 
 // prints an AST to a specified output channel
-let print_ast' (ast : modul * list<string * FStar.Range.range>) : FStar.Util.out_channel -> unit =
-    ast ||> TD.modul_with_comments_to_document
-        |> fst
-        |> PP.pretty_out_channel 1.0 100
+let print_ast' : AST -> FStar.Util.out_channel -> unit =
+    ast_to_doc
+    >> PP.pretty_out_channel 1.0 100
 
 // prints an AST to stdout
-let print_ast (ast : modul * list<string * FStar.Range.range>) : unit =
-    print_ast' ast stdout
+let print_ast : AST -> unit =
+    flip print_ast' stdout
 
-let write_ast_to_file (ast : modul * list<string * FStar.Range.range>) (filename:string) =
-    let swriter = new System.IO.StreamWriter(filename, false);
-    print_ast' ast swriter;
-    swriter.Flush();
-    swriter.Close();
-    ()
+let write_ast_to_file (filename:string): AST -> unit =
+    ast_to_string 
+    >> curry IO.File.WriteAllText filename

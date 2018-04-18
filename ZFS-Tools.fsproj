@@ -37,6 +37,9 @@
     <Reference Include="basic, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null">
       <HintPath>packages/ZFStar/tools/basic.dll</HintPath>
     </Reference>
+    <Reference Include="extraction, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>packages\ZFStar\tools\extraction.dll</HintPath>
+    </Reference>
     <Reference Include="FSharp.PPrint, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null">
       <HintPath>packages\ZFStar\tools\FSharp.PPrint.dll</HintPath>
     </Reference>
