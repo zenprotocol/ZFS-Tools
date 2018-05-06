@@ -221,7 +221,9 @@ let rec check_term ({tm=term}: term) : unit =
     | Labeled(term, _, _) -> check_term term
     | Discrim _ -> ()
     | Attributes _ -> failwith "Attributes are not permitted."
-    | Assign _ -> failwith "Assigns are not permitted" 
+    | Antiquote _
+    | Quote _
+    | VQuote _ -> failwith "Quotations are not currently permitted" 
     
 and check_branch: branch -> unit = function
     | (_, Some _, _) -> failwith "When clauses are not currently implemented." 
@@ -236,7 +238,7 @@ let module_name_ok: list<string> -> bool =
     
 let check_module_lid (lid:lid): unit =
     if module_name_ok ^ path_of_lid lid then ()
-    else failwith "`%s` is not permitted as a module name" ^ string_of_lid lid
+    else failwith "`%s` is not permitted as a module name." ^ string_of_lid lid
 
 let check_decl ({d=decl}: decl) =
     match decl with
@@ -258,6 +260,7 @@ let check_decl ({d=decl}: decl) =
     | Pragma _ -> failwith "Pragmas are not permitted."
     | Fsdoc _ -> ()
     | Assume _ -> failwith "Assumes are not permitted."
+    | Splice _ -> failwith "Splices are not permitted."
 
 let check_module (modul: modul): unit =
     modul
@@ -528,7 +531,7 @@ let is_lemma_lid : lid -> bool = function
 
 let rec is_lemma_type : term' -> bool = function
     | Construct(lid, _) -> is_lemma_lid lid
-    | Product(binders, tm) -> is_lemma_type tm.tm
+    | Product(_, tm) -> is_lemma_type tm.tm
     | _ -> false
 
 let is_lemma_val : decl -> bool = function
@@ -536,7 +539,7 @@ let is_lemma_val : decl -> bool = function
     | _ -> false 
 
 let is_lemma_pat : pattern' -> bool = function
-    | PatAscribed(_, {tm=ascription_type}) -> is_lemma_type ascription_type
+    | PatAscribed(_, ({tm=ascription_type},_)) -> is_lemma_type ascription_type
     | _ -> false
     
 let is_lemma_tll : decl -> bool = function
@@ -562,6 +565,7 @@ let elab_decl ({d=d} as decl) =
         | SubEffect _ -> failwith "effect declarations are not currently permitted"
         | Assume _ -> failwith "assumes are not currently permitted"
         | Pragma _ -> failwith "pragmas are not currently permitted"
+        | Splice _ -> failwith "splices are currently permitted"
         | TopLevelModule _ | Open _ | Include _ | ModuleAbbrev _ | Val _ | Fsdoc _ -> d
     
     { decl with d = d_elaborated }
