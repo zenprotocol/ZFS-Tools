@@ -5,6 +5,7 @@ open System
 open FStar.Parser.AST
 open FStar.Ident
 open FStar.Const
+open FSharpx.Collections.List
 open FSharpx.Functional.Prelude
 open FStar.Range
 
@@ -17,8 +18,9 @@ let mapFst (f: 'a -> 'c) (fst: 'a, snd: 'b) : 'c * 'b =
 let mapSnd (f: 'b -> 'c) (fst: 'a, snd: 'b) : 'a * 'c =
     fst, f snd 
 
-let string_of_path : path -> string = String.concat "."
-let string_of_lid  : lid  -> string = path_of_lid >> string_of_path
+let lid_of_string: string -> lid = lid_of_str
+let string_of_path: path -> string = String.concat "."
+let string_of_lid: lid  -> string = path_of_lid >> string_of_path
 
 let lid_of_module: modul -> lid = function
     | Module (lid, _)
@@ -627,26 +629,53 @@ let main_decl_let range = (* [let mainFunction = MainFunc (CostFunc cf) main] *)
 let main_decl' range = [ main_decl_val range; main_decl_let range ]
 let main_decls = main_decl' FStar.Range.dummyRange
 
-let elab_module m =
-    match m with
-    | Module (lid,decls) -> 
-        let decls = elab_decls decls
-        Module (lid, decls)
-    | Interface (lid, decls, bool) -> 
-        let decls = elab_decls decls
-        Interface (lid, decls, bool)
+let map_decls (f: list<decl> -> list<decl>): modul -> modul = function
+    | Module (lid, decls) -> Module (lid, f decls)
+    | Interface (lid, decls, bool) -> Interface (lid, f decls, bool)
 
-let add_main_decl : modul -> modul = function
-    | Module (lid, decls) -> 
-        Module (lid, decls @ main_decls)
-    | Interface (lid, decls, bool) -> 
-        Interface (lid, decls @ main_decls, bool)
+let cons_decls: list<decl> -> modul -> modul =
+    map_decls << List.append
+
+let cons_decl: decl -> modul -> modul =
+    map_decls << cons 
+
+let append_decls (decls: list<decl>): modul -> modul =
+    map_decls (fun ds -> ds @ decls) 
+
+let append_decl (decl: decl): modul -> modul =
+    append_decls [decl]
+
+let add_main_decl: modul -> modul =
+    append_decls main_decls
+     
+let elab_module: modul -> modul =
+    map_decls elab_decls
 
 let elab_ast : AST -> AST =
     mapFst elab_module
 
 let add_main_to_ast : AST -> AST =
     mapFst add_main_decl
+
+let remove_module_name_decl: modul -> modul =
+    let remove: list<decl> -> list<decl> = function
+        | {d=TopLevelModule _}::decls
+        | {d=Fsdoc _}::{d=TopLevelModule _}::decls
+        | decls -> decls
+    map_decls remove
+
+let add_module_name_decl (m:modul): modul =
+    m |> cons_decl { d=TopLevelModule (lid_of_module m)
+                     drange=FStar.Range.dummyRange
+                     doc=None
+                     quals=[]
+                     attrs=[] }
+
+let remove_module_name: AST -> AST =
+    mapFst remove_module_name_decl
+
+let add_module_name: AST -> AST =
+    mapFst add_module_name_decl
 
 (******************************************************************************)
 (* Printing                                                                   *)
