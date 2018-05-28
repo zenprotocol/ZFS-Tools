@@ -9,18 +9,33 @@ open FSharpx.Collections.List
 open FSharpx.Functional.Prelude
 open FStar.Range
 
+module BU = FStar.Util
+module PI = FStar.Parser.ParseIt
+module PD = FStar.Parser.Dep
 module String = FSharpx.String
+module PP = FStar.Pprint
+module TD = FStar.Parser.ToDocument
 
-type AST = file * (string * FStar.Range.range) list
+
+type Comment = string * FStar.Range.range
+type Fragment = list<decl> * list<Comment>
+type AST = modul * list<Comment>
 
 let mapFst (f: 'a -> 'c) (fst: 'a, snd: 'b) : 'c * 'b = 
     f fst, snd
 let mapSnd (f: 'b -> 'c) (fst: 'a, snd: 'b) : 'a * 'c =
     fst, f snd 
 
-let lid_of_string: string -> lid = lid_of_str
-let string_of_path: path -> string = String.concat "."
-let string_of_lid: lid  -> string = path_of_lid >> string_of_path
+let lid_of_string: string -> lid =
+    lid_of_str
+let string_of_path: path -> string =
+    String.concat "."
+let string_of_lid: lid -> string =
+    path_of_lid >> string_of_path
+let module_name_of_file: string -> string =
+    PD.module_name_of_file
+let module_lid_of_file: string -> lid =
+    module_name_of_file >> lid_of_string
 
 let lid_of_module: modul -> lid = function
     | Module (lid, _)
@@ -29,6 +44,15 @@ let lid_of_module: modul -> lid = function
 let decls_of_modul: modul -> list<decl> = function
     | Module(_, decls)
     | Interface(_, decls, _) -> decls
+
+let decls_to_modul: lid -> list<decl> -> modul =
+    curry Module
+
+let decls_to_interface: lid -> bool -> list<decl> -> modul =
+    curry3 Interface >> flip
+
+let frag_to_ast: lid -> Fragment -> AST =
+    mapFst << decls_to_modul
 
 (* Gets the module name of an AST as a string *)
 let get_module_lid : AST -> lid = lid_of_module << fst
@@ -677,17 +701,26 @@ let remove_module_name: AST -> AST =
 let add_module_name: AST -> AST =
     mapFst add_module_name_decl
 
+
 (******************************************************************************)
 (* Printing                                                                   *)
 (******************************************************************************)
 
-module PP = FStar.Pprint
-module TD = FStar.Parser.ToDocument
-
 let string_of_doc: PP.document -> string =
     PP.pretty_string 1.0 100
 
-let parse_file (filename:string) : AST =
+let parse_frag (fn: string): Fragment =
+    match PI.parse (PI.Filename fn) with
+    | PI.ASTFragment (BU.Inl modul, comments) ->
+        decls_of_modul modul, comments
+    | PI.ASTFragment (BU.Inr decls, comments) ->
+        decls, comments
+    | PI.Term _ -> 
+        failwith "expected an AST fragment"
+    | PI.ParseError (error, msg, r) -> 
+        FStar.Errors.raise_error (error, msg) r
+
+let parse_file (filename: string) : AST =
     FStar.Parser.Driver.parse_file filename
 
 let modul_to_string: modul -> string =
