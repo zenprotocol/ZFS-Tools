@@ -1,7 +1,4 @@
 source https://www.nuget.org/api/v2
-
-nuget FSharp.Compiler.Tools 4.1.23 restriction: >= net45
-nuget FSharp.Core 4.3.4 restriction: >= net45
-nuget System.ValueTuple 4.3.0 restriction: >= net45
-nuget ZFStar >= 0.0.20
+framework: net47
+nuget ZFStar 0.0.26-alpha
 nuget FSharpx.Extras 
