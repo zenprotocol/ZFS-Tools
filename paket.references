@@ -1,2 +1,5 @@
+FSharp.Compiler.Tools
+FSharp.Core
+System.ValueTuple
 ZFStar
 FSharpx.Extras
