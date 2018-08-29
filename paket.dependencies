@@ -1,6 +1,6 @@
 source https://www.nuget.org/api/v2
 
-framework: net45
+framework: auto-detect
 
-nuget ZFStar 0.0.26-alpha
+nuget ZFStar 0.0.26
 nuget FSharpx.Extras 

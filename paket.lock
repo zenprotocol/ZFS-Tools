@@ -12,4 +12,4 @@ NUGET
     FSharpx.Extras (2.2.1)
       FSharpx.Async
       FSharpx.Collections
-    ZFStar (0.0.26-alpha)
+    ZFStar (0.0.26)
