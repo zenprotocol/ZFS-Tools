@@ -185,6 +185,7 @@ let rec check_term ({tm=term}: term) : unit =
     | IfBind(term1, term2, term3) -> check_term term1;
                                      check_term term2;
                                      check_term term3
+    | MatchBind(term, branches)
     | Match(term, branches) -> check_term term;
                                branches |> List.iter check_branch
     | TryWith _ -> failwith "Try ... with ... is not currently implemented."
@@ -480,6 +481,29 @@ let rec elab_term
                       branches_when
                       branches_terms_elaborated
         let match_term = Match (e1_elaborated, branches_elaborated)
+                         |> mk_term_here
+        (match_term, match_cost)
+
+    | MatchBind (e1, branches) -> (* match! e1 with | branches [0] | branches [1] ... | branches [last] *)
+        let e1_elaborated, e1_cost = elab_term e1
+        let (branches_patterns : list<pattern>), // the match cases
+            (branches_when : list<( option<term> )>), // optional when clause, currently not enabled
+            (branches_terms : list<term>) = // the term in each branch
+                List.unzip3 branches
+
+        let branches_patterns_costs = branches_patterns |> List.map pat_cost
+        let sum_branches_patterns_costs = List.sum branches_patterns_costs
+        let (branches_terms_elaborated : list<term>),
+            (branches_terms_costs : list<int>) =
+                 branches_terms |> List.map elab_term
+                                |> List.unzip
+        let max_branch_cost = List.max branches_terms_costs
+        let match_cost = e1_cost + sum_branches_patterns_costs + max_branch_cost
+        let branches_elaborated : list<branch> =
+            List.zip3 branches_patterns
+                      branches_when
+                      branches_terms_elaborated
+        let match_term = MatchBind (e1_elaborated, branches_elaborated)
                          |> mk_term_here
         (match_term, match_cost)
 
