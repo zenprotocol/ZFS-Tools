@@ -116,8 +116,15 @@ let rec unparen: term -> term = function
 let fsharpkeywords : Set<string> =
     Set.ofList FStar.Extraction.ML.Syntax.fsharpkeywords
 
+let zfstarkeywords : Set<string> =
+    Set.ofList [
+        "letBang";
+        "ifBang";
+        "matchBang";
+    ]
+
 let is_reserved_name (name: string) : bool =
-    fsharpkeywords
+    (Set.union fsharpkeywords zfstarkeywords)
     |> Set.contains name
 
 let is_potential_cli_conflict s =
