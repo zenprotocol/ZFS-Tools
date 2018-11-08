@@ -8,3 +8,5 @@ paket-files
 paket.local
 
 *.nupkg
+
+paket.local

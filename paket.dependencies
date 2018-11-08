@@ -1,6 +1,7 @@
 source https://www.nuget.org/api/v2
+source https://www.myget.org/F/zenprotocol/api/v3/index.json
 
 framework: auto-detect
 
-nuget ZFStar 0.0.26
-nuget FSharpx.Extras 
+nuget ZFStar 0.0.27-alpha001
+nuget FSharpx.Extras
