@@ -591,9 +591,10 @@ let rec elab_term
 let elab_term_node node =
     elab_term node |> mk_inc
 
-let is_lemma_lid : lid -> bool = function
-    | { ns=[]; ident={idText="Lemma"}; nsstr=""; str="Lemma" } -> true
-    | _ -> false
+let is_lemma_lid (lid: lid): bool =
+    lid.ident.idText = "Lemma" && match lid.ns with
+                                  | [] | [{idText="Prims"}] -> true
+                                  | _ -> false
 
 let rec is_lemma_type : term' -> bool = function
     | Construct(lid, _) -> is_lemma_lid lid
@@ -613,14 +614,66 @@ let is_lemma_tll : decl -> bool = function
             is_lemma_pat tll_patn
     | _ -> false
 
+let is_gtot_lid (lid: lid): bool =
+    lid.ident.idText = "GTot" && match lid.ns with
+                                 | [] | [{idText="Prims"}] -> true
+                                 | _ -> false
+
+let rec is_gtot_type : term' -> bool = function
+    | Construct(lid, _) -> is_gtot_lid lid
+    | Product(_, tm) -> is_gtot_type tm.tm
+    | _ -> false
+
+let is_gtot_val : decl -> bool = function
+    | { d=Val(_, {tm=signature_tm}) } -> is_gtot_type signature_tm
+    | _ -> false
+
+let is_gtot_pat : pattern' -> bool = function
+    | PatAscribed(_, ({tm=ascription_type},_)) -> is_gtot_type ascription_type
+    | _ -> false
+
+let is_gtot_tll : decl -> bool = function
+    | { d=TopLevelLet(_, [{pat=tll_patn}, _]) } -> // TODO: Should we allow recursion-recursion here?
+            is_gtot_pat tll_patn
+    | _ -> false
+
+let is_ghost_lid (lid: lid): bool =
+    lid.ident.idText = "Ghost" && match lid.ns with
+                                 | [] | [{idText="Prims"}] -> true
+                                 | _ -> false
+
+let rec is_ghost_type : term' -> bool = function
+    | Construct(lid, _) -> is_ghost_lid lid
+    | Product(_, tm) -> is_ghost_type tm.tm
+    | _ -> false
+
+let is_ghost_val : decl -> bool = function
+    | { d=Val(_, {tm=signature_tm}) } -> is_ghost_type signature_tm
+    | _ -> false
+
+let is_ghost_pat : pattern' -> bool = function
+    | PatAscribed(_, ({tm=ascription_type},_)) -> is_ghost_type ascription_type
+    | _ -> false
+
+let is_ghost_tll : decl -> bool = function
+    | { d=TopLevelLet(_, [{pat=tll_patn}, _]) } -> // TODO: Should we allow recursion-recursion here?
+            is_ghost_pat tll_patn
+    | _ -> false
+
+let no_elab_tll (tll: decl): bool =
+    is_lemma_tll tll || is_ghost_tll tll || is_gtot_tll tll
+
+let no_elab_val (vl: decl): bool =
+    is_lemma_val vl || is_ghost_val vl || is_gtot_val vl
+    
 //elaborates a decl
 let elab_decl ({d=d} as decl) =
     let d_elaborated =
         match d with
         | Main tm -> Main (elab_term_node tm)
         | TopLevelLet (q,p) ->
-            if is_lemma_tll decl then d
-            else // Do not elaborate lemmas
+            if no_elab_tll decl then d
+            else
                 p |> List.map (mapSnd elab_term_node)
                   |> tuple2 q
                   |> TopLevelLet
@@ -653,8 +706,9 @@ let rec elab_decls : list<decl> -> list<decl> = function
         match snd.d with
         | TopLevelLet _ ->
             (* If we have a val and a top-level-let with the same name,
-               and the val is a lemma, do not elaborate the top-level-let. *)
-            if is_lemma_val fst &&
+               and the val is a lemma, gtot, or ghost term, 
+               then do not elaborate the top-level-let. *)
+            if no_elab_val fst &&
                name_of_decl fst = name_of_decl snd
             then fst::snd::elab_decls tl
             else elab_decl fst :: elab_decls (snd::tl)

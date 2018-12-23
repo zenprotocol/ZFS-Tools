@@ -3,7 +3,7 @@ NUGET
   remote: https://www.nuget.org/api/v2
     FSharp.Control.AsyncSeq (2.0.21)
       FSharp.Core (>= 3.1.2)
-    FSharp.Core (4.3.4)
+    FSharp.Core (4.5.3)
     FSharpx.Async (1.13.2)
       FSharp.Control.AsyncSeq
       FSharp.Core
