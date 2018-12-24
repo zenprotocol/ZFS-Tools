@@ -26,6 +26,14 @@ let mapFst (f: 'a -> 'c) (fst: 'a, snd: 'b) : 'c * 'b =
 let mapSnd (f: 'b -> 'c) (fst: 'a, snd: 'b) : 'a * 'c =
     fst, f snd
 
+let private eitherIter
+    (f: 'a -> unit)
+    (g: 'b -> unit)
+    : BU.either<'a, 'b> -> unit = function 
+                                  | BU.Inl x -> f x
+                                  | BU.Inr y -> g y
+
+    
 let lid_of_string: string -> lid =
     lid_of_str
 let string_of_path: path -> string =
@@ -174,7 +182,6 @@ let rec check_term ({tm=term}: term) : unit =
     | Abs(pats, term) -> pats |> List.iter check_pattern;
                          check_term term
     | App(term1, term2, _) -> check_term term1; check_term term2
-    | Let(Mutable, _, _) -> failwith "Mutation is not permitted."
     | Let(_, letbindings, term) ->
         letbindings
         |> List.iter begin function
@@ -202,9 +209,11 @@ let rec check_term ({tm=term}: term) : unit =
     | Record(term, fields) -> term |> Option.iter check_term;
                               fields |> List.iter (check_term << snd)
     | Project(term, _) -> check_term term
-    | Product(binders, term)
-    | Sum(binders, term) -> binders |> List.iter check_binder;
+    | Product(binders, term) -> binders |> List.iter check_binder;
                                 check_term term
+    | Sum(binders, term) ->
+          binders |> List.iter (eitherIter check_binder check_term);
+          check_term term
     | QForall(binders, terms, term)
     | QExists(binders, terms, term) ->
         binders |> List.iter check_binder;
@@ -221,6 +230,7 @@ let rec check_term ({tm=term}: term) : unit =
     | Antiquote _
     | Quote _
     | VQuote _ -> failwith "Quotations are not currently permitted"
+    | CalcProof _ -> failwith "Calc proofs are not currently permitted"
 
 and check_pattern ({pat=pat}: pattern) : unit =
     match pat with
@@ -234,7 +244,6 @@ and check_pattern ({pat=pat}: pattern) : unit =
     | PatName _ -> ()
     | PatList pats
     | PatTuple(pats, _)
-    | PatVector pats
     | PatOr pats ->
         pats |> List.iter check_pattern
     | PatRecord pats ->
@@ -288,7 +297,6 @@ let check_decl ({d=decl}: decl) =
     | Friend _ -> failwith "Friend modules are not yet available."
     | Include _ -> failwith "Includes are not permitted."
     | ModuleAbbrev(abbrev, _) -> check_module_abbrev abbrev
-    | TopLevelLet(Mutable, _) -> failwith "Mutation is not permitted."
     | TopLevelLet(_, letBindings) ->
         letBindings |>! List.iter (check_pattern << fst)
                     |>  List.iter (check_term << snd)
@@ -328,7 +336,6 @@ let rec pat_cost {pat=pat} =
         pat_cost pat
 
     | PatList pats
-    | PatVector pats
     | PatTuple (pats, _)
     | PatOr pats ->
         pats |> List.map pat_cost
@@ -639,8 +646,8 @@ let is_gtot_tll : decl -> bool = function
 
 let is_ghost_lid (lid: lid): bool =
     lid.ident.idText = "Ghost" && match lid.ns with
-                                 | [] | [{idText="Prims"}] -> true
-                                 | _ -> false
+                                  | [] | [{idText="Prims"}] -> true
+                                  | _ -> false
 
 let rec is_ghost_type : term' -> bool = function
     | Construct(lid, _) -> is_ghost_lid lid

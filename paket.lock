@@ -13,4 +13,4 @@ NUGET
       FSharpx.Async
       FSharpx.Collections
   remote: https://www.myget.org/F/zenprotocol/api/v3/index.json
-    ZFStar (0.0.27-alpha001)
+    ZFStar (0.0.27-alpha002)
