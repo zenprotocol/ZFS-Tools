@@ -1,9 +1,10 @@
-RESTRICTION: == net45
+GENERATE-LOAD-SCRIPTS: ON
+RESTRICTION: == net472
 NUGET
   remote: https://www.nuget.org/api/v2
     FSharp.Control.AsyncSeq (2.0.21)
       FSharp.Core (>= 3.1.2)
-    FSharp.Core (4.5.3)
+    FSharp.Core (4.6.2)
     FSharpx.Async (1.13.2)
       FSharp.Control.AsyncSeq
       FSharp.Core

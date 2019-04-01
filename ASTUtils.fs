@@ -1,6 +1,5 @@
 module ASTUtils
 
-open FSharpx
 open System
 open FStar.Parser.AST
 open FStar.Ident
@@ -21,7 +20,7 @@ type Comment = string * FStar.Range.range
 type Fragment = list<decl> * list<Comment>
 type AST = modul * list<Comment>
 
-let mapFst (f: 'a -> 'c) (fst: 'a, snd: 'b) : 'c * 'b =
+let mapFst (f: 'a -> 'c) (fst: 'a,  snd: 'b) : 'c * 'b =
     f fst, snd
 let mapSnd (f: 'b -> 'c) (fst: 'a, snd: 'b) : 'a * 'c =
     fst, f snd
@@ -522,12 +521,22 @@ let rec elab_term
         (match_term, match_cost)
 
     | Let (qualifier, pattern_term_pairs, expr1) -> (* let [patterns] = [terms] in expr1 *)
+        
         let rec elab_pat_term_pair (attr, (pat, term)) =
             let term_elaborated, term_cost = elab_term term
             match pat with
-            | { pat=PatApp _ } -> // functions must have annotated cost
-                let inc_term_elaborated = mk_inc (term_elaborated, term_cost)
-                ((attr, (pat, inc_term_elaborated)), 0)
+            | { pat=PatApp (pat', vars) } -> // functions must have annotated cost
+                match pat'.pat with
+                | PatOp _
+                | PatVar _ -> // functions must have annotated cost
+                    // todo: add pattern costs for vars
+                    let inc_term_elaborated = mk_inc (term_elaborated, term_cost)
+                    ((attr, (pat, inc_term_elaborated)), 0)
+                | _ ->
+                    let pat_term_pair = attr, (pat, term_elaborated)
+                    let pat_term_pair_cost =
+                        term_cost + pat_cost pat' + List.sumBy pat_cost vars
+                    pat_term_pair, pat_term_pair_cost
             | { pat=PatAscribed (pat', _) } ->
                 //if the pattern has an ascription, retry with the ascribed pattern
                 elab_pat_term_pair (attr, (pat', term))
